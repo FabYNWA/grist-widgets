@@ -90,6 +90,7 @@ async function fetchFootballData(champName, code, workerUrl) {
     Buts_Marques: row.goalsFor,
     Buts_Encaisses: row.goalsAgainst,
     Journee: row.playedGames,
+    Logo_URL: row.team.crest || '',
     Date_Extraction: Math.floor(Date.now() / 1000)
   }));
 }
@@ -113,6 +114,7 @@ async function fetchSportsDB(champName, leagueId, seasonLabel, workerUrl) {
     Buts_Marques: parseInt(row.intGoalsFor, 10),
     Buts_Encaisses: parseInt(row.intGoalsAgainst, 10),
     Journee: parseInt(row.intPlayed, 10),
+    Logo_URL: row.strBadge || '',
     Date_Extraction: Math.floor(Date.now() / 1000)
   }));
 }
