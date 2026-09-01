@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Actualisation des classements</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; margin: 0; padding: 16px; background: #fafafa; }
+  h3 { margin: 0 0 12px; font-size: 15px; }
+  button { background: #2b6cb0; color: white; border: none; padding: 10px 18px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  button:disabled { background: #a0aec0; cursor: not-allowed; }
+  .config { margin-bottom: 14px; }
+  .config label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
+  .config input { width: 100%; box-sizing: border-box; padding: 6px 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; }
+  #log { margin-top: 14px; font-size: 12px; color: #333; white-space: pre-wrap; max-height: 220px; overflow-y: auto; background: #fff; border: 1px solid #eee; padding: 8px; border-radius: 4px; }
+  .ok { color: #2f855a; }
+  .err { color: #c53030; }
+</style>
+</head>
+<body>
+
+<h3>Actualisation des classements (paris long terme)</h3>
+
+<div class="config">
+  <label>Clé API football-data.org (gratuite sur football-data.org/client/register)</label>
+  <input id="fdKey" type="text" placeholder="X-Auth-Token">
+</div>
+
+<button id="refreshBtn">Actualiser les classements</button>
+<div id="log"></div>
+
+<script>
+// --- Configuration des championnats couverts par football-data.org (codes v4) ---
+const FOOTBALL_DATA_COMPETITIONS = {
+  "Ligue 1": "FL1",
+  "Premier League": "PL",
+  "Bundesliga": "BL1",
+  "Serie A": "SA",
+  "LaLiga": "PD",
+  "Liga Portugal": "PPL"
+};
+
+// --- TheSportsDB (clé de test publique "3") pour la Super Lig ---
+const SPORTSDB_LEAGUE_IDS = {
+  "Super Lig": "4339"
+};
+
+let gristReady = false;
+
+grist.ready({
+  requiredAccess: 'full',
+  columns: []
+});
+
+grist.onOptions((options) => {
+  if (options && options.fdKey) {
+    document.getElementById('fdKey').value = options.fdKey;
+  }
+});
+
+document.getElementById('fdKey').addEventListener('change', (e) => {
+  grist.widgetApi.setOption('fdKey', e.target.value);
+});
+
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function fetchFootballData(champName, code, apiKey) {
+  const url = `https://api.football-data.org/v4/competitions/${code}/standings`;
+  const resp = await fetch(url, { headers: { 'X-Auth-Token': apiKey } });
+  if (!resp.ok) {
+    throw new Error(`football-data.org ${champName}: HTTP ${resp.status}`);
+  }
+  const data = await resp.json();
+  const table = data.standings.find(s => s.type === 'TOTAL');
+  if (!table) throw new Error(`football-data.org ${champName}: pas de tableau TOTAL`);
+  const season = `${data.season.startDate.slice(0,4)}/${data.season.endDate.slice(0,4)}`;
+  return table.table.map(row => ({
+    Championnat: champName,
+    Saison: season,
+    Equipe: row.team.name,
+    Position: row.position,
+    Points: row.points,
+    Buts_Marques: row.goalsFor,
+    Buts_Encaisses: row.goalsAgainst,
+    Journee: row.playedGames,
+    Date_Extraction: Math.floor(Date.now() / 1000)
+  }));
+}
+
+async function fetchSportsDB(champName, leagueId, seasonLabel) {
+  // seasonLabel attendu au format "2026-2027" pour l'API TheSportsDB
+  const season = seasonLabel.replace('/', '-');
+  const url = `https://www.thesportsdb.com/api/v1/json/3/lookuptable.php?l=${leagueId}&s=${season}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`TheSportsDB ${champName}: HTTP ${resp.status}`);
+  }
+  const data = await resp.json();
+  if (!data.table) throw new Error(`TheSportsDB ${champName}: pas de données pour la saison ${seasonLabel}`);
+  return data.table.map(row => ({
+    Championnat: champName,
+    Saison: seasonLabel,
+    Equipe: row.strTeam,
+    Position: parseInt(row.intRank, 10),
+    Points: parseInt(row.intPoints, 10),
+    Buts_Marques: parseInt(row.intGoalsFor, 10),
+    Buts_Encaisses: parseInt(row.intGoalsAgainst, 10),
+    Journee: parseInt(row.intPlayed, 10),
+    Date_Extraction: Math.floor(Date.now() / 1000)
+  }));
+}
+
+async function refreshAll() {
+  const btn = document.getElementById('refreshBtn');
+  const apiKey = document.getElementById('fdKey').value.trim();
+  document.getElementById('log').innerHTML = '';
+  btn.disabled = true;
+
+  if (!apiKey) {
+    log('⚠️ Renseigne ta clé football-data.org avant de lancer l\'actualisation.', 'err');
+    btn.disabled = false;
+    return;
+  }
+
+  // Récupère les saisons distinctes utilisées dans la table Selections pour la Super Lig
+  let superLigSeasons = ['2026-2027'];
+  try {
+    const selections = await grist.docApi.fetchTable('Selections');
+    const seasons = new Set();
+    for (let i = 0; i < selections.Championnat.length; i++) {
+      if (selections.Championnat[i] === 'Super Lig') {
+        seasons.add(selections.Saison[i]);
+      }
+    }
+    if (seasons.size > 0) superLigSeasons = Array.from(seasons);
+  } catch (e) {
+    log('Impossible de lire la table Selections pour déduire la saison Super Lig, utilisation de 2026-2027 par défaut.', 'err');
+  }
+
+  let allRows = [];
+
+  for (const [champName, code] of Object.entries(FOOTBALL_DATA_COMPETITIONS)) {
+    try {
+      const rows = await fetchFootballData(champName, code, apiKey);
+      allRows = allRows.concat(rows);
+      log(`✔ ${champName} : ${rows.length} équipes récupérées`, 'ok');
+    } catch (e) {
+      log(`✘ ${champName} : ${e.message}`, 'err');
+    }
+    // football-data.org free tier : 10 req/min, on espace légèrement les appels
+    await new Promise(r => setTimeout(r, 6500));
+  }
+
+  for (const [champName, leagueId] of Object.entries(SPORTSDB_LEAGUE_IDS)) {
+    for (const seasonLabel of superLigSeasons) {
+      try {
+        const rows = await fetchSportsDB(champName, leagueId, seasonLabel);
+        allRows = allRows.concat(rows);
+        log(`✔ ${champName} (${seasonLabel}) : ${rows.length} équipes récupérées`, 'ok');
+      } catch (e) {
+        log(`✘ ${champName} (${seasonLabel}) : ${e.message}`, 'err');
+      }
+    }
+  }
+
+  if (allRows.length > 0) {
+    try {
+      const colNames = Object.keys(allRows[0]);
+      const colValues = {};
+      colNames.forEach(c => colValues[c] = allRows.map(r => r[c]));
+      await grist.docApi.applyUserActions([
+        ['BulkAddRecord', 'Classements_Snapshot', new Array(allRows.length).fill(null), colValues]
+      ]);
+      log(`\n${allRows.length} lignes ajoutées à Classements_Snapshot.`, 'ok');
+    } catch (e) {
+      log(`✘ Erreur lors de l'écriture dans Grist : ${e.message}`, 'err');
+    }
+  }
+
+  btn.disabled = false;
+}
+
+document.getElementById('refreshBtn').addEventListener('click', refreshAll);
+</script>
+</body>
+</html>
