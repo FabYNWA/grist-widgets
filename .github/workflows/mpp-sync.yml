@@ -1,0 +1,32 @@
+name: MPP sync
+
+on:
+  schedule:
+    - cron: "30 5 * * *"   # tous les jours : cotes + resultats + logos
+    - cron: "30 22 * * *"  # tous les soirs : resultats seulement
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "all ou results"
+        default: "all"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Synchroniser
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          FD_TOKEN: ${{ secrets.FD_TOKEN }}
+          GRIST_API_KEY: ${{ secrets.GRIST_API_KEY }}
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            if [ "${{ github.event.schedule }}" = "30 22 * * *" ]; then MODE=results; else MODE=all; fi
+          fi
+          python mpp-pronostics/sync.py "$MODE"
