@@ -82,9 +82,14 @@ def g_add(table, rows):
 
 
 def g_update(table, updates):
-    for i in range(0, len(updates), 200):
-        chunk = updates[i:i + 200]
-        g("/tables/%s/records" % table, "PATCH", {"records": [{"id": rid, "fields": f} for rid, f in chunk]})
+    # Grist exige les memes champs pour tous les enregistrements d'un PATCH : on groupe par jeu de champs.
+    groups = {}
+    for rid, f in updates:
+        groups.setdefault(tuple(sorted(f)), []).append((rid, f))
+    for rows in groups.values():
+        for i in range(0, len(rows), 200):
+            chunk = rows[i:i + 200]
+            g("/tables/%s/records" % table, "PATCH", {"records": [{"id": rid, "fields": f} for rid, f in chunk]})
 
 
 # ---------------------------------------------------------------- noms
