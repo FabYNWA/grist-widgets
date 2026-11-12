@@ -20,7 +20,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 GRIST_BASE = os.environ.get("GRIST_BASE", "https://docs.getgrist.com").rstrip("/")
-GRIST_DOC = os.environ.get("GRIST_DOC", "qmJfcfW8XCRi1m4GJWYPRE")
+GRIST_DOC = os.environ.get("GRIST_DOC", "h8PMDZW6a3gBWYf8BhSvcd")
 GRIST_KEY = os.environ.get("GRIST_API_KEY", "")
 ODDS_KEY = os.environ.get("ODDS_API_KEY", "")
 FD_TOKEN = os.environ.get("FD_TOKEN", "")
